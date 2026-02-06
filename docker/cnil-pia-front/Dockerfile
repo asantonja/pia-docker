@@ -1,30 +1,46 @@
-FROM node:14 as builder
+# ===== Étape 1 : Build Angular avec Node 20 =====
+FROM node:20 AS build
 
-USER root
+# Optionnel : pour des installations plus rapides en CI
+ENV CI=true
 
-ARG PIA_VERSION=3.0.2
-ARG NODE_SASS_VERSION=4.14.1
-ARG ANGULAR_CLI_VERSION=latest
+WORKDIR /app
 
-WORKDIR /build
+# Récupère le code du front depuis le dépôt officiel LINCnil
+# (Option A) Toujours la dernière version de la branche par défaut
+RUN git clone --depth 1 https://github.com/LINCnil/pia.git .
 
-RUN npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+# (Option B) Si tu veux pinner une release précise au lieu de la branche :
+# ARG PIA_VERSION=3.2.2
+# RUN wget -O pia.zip "https://github.com/LINCnil/pia/archive/refs/tags/v${PIA_VERSION}.zip" \
+#  && unzip pia.zip && rm pia.zip \
+#  && mv "pia-${PIA_VERSION}"/* . \
+#  && rm -rf "pia-${PIA_VERSION}"
 
-RUN wget https://github.com/LINCnil/pia/archive/refs/tags/v$PIA_VERSION.zip
+# Active Corepack et choisit Yarn (projet PIA utilise Yarn)
+RUN corepack enable && corepack prepare yarn@stable --activate
 
-RUN unzip v$PIA_VERSION.zip \
- && rm v$PIA_VERSION.zip \
- && cd pia-$PIA_VERSION \
- # Note, it should be npm ci but the upstream do not necessarily sync the package-lock
- && npm install \
- && npm install node-sass@$NODE_SASS_VERSION \
- && ng build --prod --build-optimizer \
- && mv /build/pia-$PIA_VERSION /build/pia
+# Installe les dépendances (le projet fournit un lockfile)
+RUN yarn install --frozen-lockfile
 
-FROM nginx:1.21
+# Build de prod (adapte si besoin selon package.json)
+# - Soit "yarn build"
+# - Soit "yarn ng build --configuration production"
+RUN yarn build
 
-RUN mkdir -p /var/www && chown www-data. /var/www/
+# ===== Étape 2 : Runtime nginx =====
+FROM nginx:alpine
 
-COPY ./conf/cnil_pia.conf /etc/nginx/conf.d/default.conf
+# (Optionnel) Environnement d'exécution
+ENV TZ=Europe/Paris
 
-COPY --from=builder /build/pia/dist/pia /var/www/
+# Copie du site statique construit par Angular
+# NB: Ajuste le chemin selon la sortie réelle du build :
+#     souvent /app/dist/pia ou /app/dist/<projectName>
+COPY --from=build /app/dist/ /usr/share/nginx/html/
+
+# (Optionnel) Si tu as un fichier de conf nginx custom
+# COPY ./conf/cnil_pia.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
