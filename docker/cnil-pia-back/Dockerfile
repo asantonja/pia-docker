@@ -1,33 +1,32 @@
-FROM ruby:3.4-slim
+FROM ruby:3.4-slim AS base
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    RAILS_ENV=production \
+    BUNDLE_DEPLOYMENT=1 \
+    BUNDLE_WITHOUT="development test" \
+    BUNDLE_JOBS=4 \
+    BUNDLE_RETRY=3
 
 # Dépendances système
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl ca-certificates \
     libpq-dev pkg-config \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
-# Bundler récent
-RUN gem update --system && gem install bundler -v "~>2.5"
+WORKDIR /app
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    RAILS_ENV=production \
-    RAILS_SERVE_STATIC_FILES=true \
-    BUNDLE_WITHOUT="development test"
-
-WORKDIR /var/www
-
-# --- 1. Cloner le backend PIA ---
+# Récupération du code backend officiel
 RUN git clone --depth 1 https://github.com/LINCnil/pia-back.git .
 
-# --- 2. SUPPRIMER le Gemfile.lock fourni par LINCnil ---
-#     (car il ne contient pas la plateforme Linux)
+# SUPPRESSION du lock d’origine (il est incompatible Linux)
 RUN rm -f Gemfile.lock
 
-# --- 3. REGENERATION du lock POUR LINUX ---
-RUN bundle lock --add-platform x86_64-linux
+# Regeneration du Gemfile.lock nativement Linux
+RUN bundle lock --add-platform x86_64-linux || true
 
-# --- 4. Installation des gems ---
-RUN bundle install --jobs=4 --retry=3
+# Installation des gems
+RUN bundle install --no-cache
 
 EXPOSE 3000
-CMD ["bin/rails", "server", "-b", "0.0.0.0", "-p", "3000"]
+
+CMD ["bin/rails", "server", "-b", "0.0.0.0"]
